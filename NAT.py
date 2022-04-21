@@ -260,3 +260,24 @@ def test():
         model2.set_input_size((5,5))
         model2(img).shape
         print('success')
+
+def test_cuda():
+    model1 = NATLayer(128,3,4).cuda()
+    model2 = NATLayer_predefined((3,3),128,3,4).cuda()
+
+    img = torch.zeros(1,128,5,5).cuda()
+    
+    print(model1(img).shape)
+    
+    try:
+        model2(img).shape
+    except:
+        print('error')
+        model2.set_input_size((5,5))
+        model2(img).shape
+        print('success')
+        
+if __name__ == '__main__' :
+    test()
+    if torch.cuda.is_available():
+        test_cuda()
