@@ -54,7 +54,7 @@ class Mlp(nn.Module):
         x = self.drop(x)
         return x
     
-class NeighborhoodAttention(nn.Module):
+class NeighborhoodAttention(nn.Module): #It can take dynamic input, but is relatively slower than NeighborhoodAttention_predefined.
     def __init__(self, dim, window_size, num_heads, qkv_bias=True, qk_scale=None, attn_drop=0., proj_drop=0.):
         super().__init__()
         assert window_size%2 == 1,'windowsize must be odd.'
@@ -144,7 +144,7 @@ class NATLayer(nn.Module):
         x = x + self.drop_path(self.mlp(self.norm2(x)))
         return x
     
-class NeighborhoodAttention_predefined(nn.Module):
+class NeighborhoodAttention_predefined(nn.Module): #Although this is relatively faster than NeighborhoodAttention.It can only accept static input, but you can define a new input size if you wish.
     def __init__(self,input_size, dim, window_size, num_heads, qkv_bias=True, qk_scale=None, attn_drop=0., proj_drop=0.):
         super().__init__()
         assert window_size%2 == 1,'windowsize must be odd.'
