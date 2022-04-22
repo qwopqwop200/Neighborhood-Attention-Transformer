@@ -54,7 +54,7 @@ class Mlp(nn.Module):
         x = self.drop(x)
         return x
     
-class NeighborhoodAttention(nn.Module): #It can take dynamic input, but is relatively slower than NeighborhoodAttention_predefined.
+class NeighborhoodAttention(nn.Module): #It can use dynamic size as input,but is relatively slower than NeighborhoodAttention_predefined.
     def __init__(self, dim, window_size, num_heads, qkv_bias=True, qk_scale=None, attn_drop=0., proj_drop=0.):
         super().__init__()
         assert window_size%2 == 1,'windowsize must be odd.'
@@ -79,7 +79,7 @@ class NeighborhoodAttention(nn.Module): #It can take dynamic input, but is relat
         
         self.idx_h = torch.arange(0,window_size)
         self.idx_w = torch.arange(0,window_size)
-        self.idx_k = ((self.idx_h[:,None] * (2*self.window_size-1)) + self.idx_w).flatten()
+        self.idx_k = ((self.idx_h.unsqueeze(-1) * (2*self.window_size-1)) + self.idx_w).view(-1)
         
     def forward(self, x):
         B,C,H,W = x.shape        
@@ -108,7 +108,7 @@ class NeighborhoodAttention(nn.Module): #It can take dynamic input, but is relat
         H = H - (self.window_size - 1)
         W = W - (self.window_size - 1)
         attn_idx = torch.arange(0,H*W,dtype=torch.float).view(1,1,H,W).contiguous()
-        attn_idx = self.pad_idx(attn_idx).flatten().type(torch.long)
+        attn_idx = self.pad_idx(attn_idx).view(-1).type(torch.long)
         return attn_idx
     
     def get_bias_idx(self,H,W):
@@ -116,8 +116,8 @@ class NeighborhoodAttention(nn.Module): #It can take dynamic input, but is relat
         num_repeat_w = torch.ones(self.window_size,dtype=torch.long)
         num_repeat_h[self.window_size//2] = H-(self.window_size-1)
         num_repeat_w[self.window_size//2] = W-(self.window_size-1)
-        bias_hw = (self.idx_h.repeat_interleave(num_repeat_h)[:,None] * (2*self.window_size-1)) + self.idx_w.repeat_interleave(num_repeat_w)
-        bias_idx = bias_hw[:,:,None] + self.idx_k
+        bias_hw = (self.idx_h.repeat_interleave(num_repeat_h).unsqueeze(-1) * (2*self.window_size-1)) + self.idx_w.repeat_interleave(num_repeat_w)
+        bias_idx = bias_hw.unsqueeze(-1) + self.idx_k
         return bias_idx.view(-1,self.window_size**2)
     
 class NATLayer(nn.Module):
@@ -144,7 +144,7 @@ class NATLayer(nn.Module):
         x = x + self.drop_path(self.mlp(self.norm2(x)))
         return x
     
-class NeighborhoodAttention_predefined(nn.Module): #Although this is relatively faster than NeighborhoodAttention.It can only accept static input, but you can define a new input size if you wish.
+class NeighborhoodAttention_predefined(nn.Module): #Although this is relatively faster than NeighborhoodAttention.It can only use static size as input,but you can define a new input size if you wish.
     def __init__(self,input_size, dim, window_size, num_heads, qkv_bias=True, qk_scale=None, attn_drop=0., proj_drop=0.):
         super().__init__()
         assert window_size%2 == 1,'windowsize must be odd.'
@@ -167,7 +167,7 @@ class NeighborhoodAttention_predefined(nn.Module): #Although this is relatively 
         
         self.idx_h = torch.arange(0,window_size)
         self.idx_w = torch.arange(0,window_size)
-        self.idx_k = ((self.idx_h[:,None] * (2*self.window_size-1)) + self.idx_w).flatten()
+        self.idx_k = ((self.idx_h.unsqueeze(-1) * (2*self.window_size-1)) + self.idx_w).view(-1)
         
         self.set_input_size(input_size)
         
@@ -195,7 +195,7 @@ class NeighborhoodAttention_predefined(nn.Module): #Although this is relatively 
         H = H - (self.window_size - 1)
         W = W - (self.window_size - 1)
         attn_idx = torch.arange(0,H*W,dtype=torch.float).view(1,1,H,W).contiguous()
-        attn_idx = self.pad_idx(attn_idx).flatten().type(torch.long)
+        attn_idx = self.pad_idx(attn_idx).view(-1).type(torch.long)
         return attn_idx
     
     def get_bias_idx(self,H,W):
@@ -203,8 +203,8 @@ class NeighborhoodAttention_predefined(nn.Module): #Although this is relatively 
         num_repeat_w = torch.ones(self.window_size,dtype=torch.long)
         num_repeat_h[self.window_size//2] = H-(self.window_size-1)
         num_repeat_w[self.window_size//2] = W-(self.window_size-1)
-        bias_hw = (self.idx_h.repeat_interleave(num_repeat_h)[:,None] * (2*self.window_size-1)) + self.idx_w.repeat_interleave(num_repeat_w)
-        bias_idx = bias_hw[:,:,None] + self.idx_k
+        bias_hw = (self.idx_h.repeat_interleave(num_repeat_h).unsqueeze(-1) * (2*self.window_size-1)) + self.idx_w.repeat_interleave(num_repeat_w)
+        bias_idx = bias_hw.unsqueeze(-1) + self.idx_k
         return bias_idx.view(-1,self.window_size**2)
     
     def set_input_size(self,input_size):
