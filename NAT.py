@@ -134,24 +134,26 @@ class NATLayer(nn.Module):
         self.attn.set_input_size(input_size)
         
 def test():
+    model = NATLayer((28,28),128,4)
+    img = torch.rand(2,128,56,56)
     try:
-        model = NATLayer((28,28),128,4)
-        img = torch.rand(2,128,56,56)
+        print(model(img).shape)
     except:
         print('error')
-        model2.set_input_size((56,56))
-        print(model2(img).shape)
-        print('success')
+        model.set_input_size((56,56))
+        print(model(img).shape)
+    print('success')
 
 def test_cuda():
+    model = NATLayer((28,28),128,4).cuda()
+    img = torch.rand(2,128,56,56).cuda()
     try:
-        model = NATLayer((28,28),128,4).cuda()
-        img = torch.rand(2,128,56,56).cuda()
+        print(model(img).shape)
     except:
         print('error')
-        model2.set_input_size((56,56))
-        print(model2(img).shape)
-        print('success')
+        model.set_input_size((56,56))
+        print(model(img).shape)
+    print('success')
         
 if __name__ == '__main__' :
     test()
