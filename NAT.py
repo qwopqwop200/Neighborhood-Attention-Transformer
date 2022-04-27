@@ -66,6 +66,7 @@ class NeighborhoodAttention(nn.Module): #It can only use static size as input,bu
         q, k, v = qkv[0], qkv[1], qkv[2]
         attn = q.unsqueeze(3) @ k[:,:,self.attn_idx].transpose(-1,-2) #B,nh,L,1,K^2
         attn = attn + self.relative_bias[self.bias_idx].permute(2, 0, 1).unsqueeze(2)
+        attn = attn.softmax(dim=-1)
         attn = self.attn_drop(attn)
         x = (attn @ v[:,:,self.attn_idx]).squeeze(3).transpose(-1,-2).contiguous().view(B,C,H,W)
         return x
