@@ -36,8 +36,6 @@ class NeighborhoodAttention(nn.Module): #It can only use static size as input,bu
         assert window_size%2 == 1,'windowsize must be odd.'
         self.dim = dim
         self.window_size = window_size
-        self.shift_size = self.window_size//2
-        self.mid_cell = self.shift_size * 2
         self.num_heads = num_heads
         head_dim = dim // num_heads
         self.scale = qk_scale or head_dim ** -0.5
