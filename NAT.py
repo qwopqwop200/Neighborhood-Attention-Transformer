@@ -64,6 +64,7 @@ class NeighborhoodAttention(nn.Module): #It can only use static size as input,bu
         assert H >= self.window_size and W >= self.window_size,'input size must not be smaller than window size'
         qkv = self.qkv(x).view(B, 3,self.num_heads,C//self.num_heads,H*W).permute(1, 0, 2, 4, 3)
         q, k, v = qkv[0], qkv[1], qkv[2]
+        q = q * self.scale
         attn = q.unsqueeze(3) @ k[:,:,self.attn_idx].transpose(-1,-2) #B,nh,L,1,K^2
         attn = attn + self.relative_bias[self.bias_idx].permute(2, 0, 1).unsqueeze(2)
         attn = attn.softmax(dim=-1)
