@@ -103,8 +103,8 @@ class NeighborhoodAttention(nn.Module): #It can only use static size as input,bu
         H,W = input_size
         self.H,self.W = H,W
         assert H >= self.window_size and W >= self.window_size,'input size must not be smaller than window size'
-        attn_idx = self.get_attn_idx(H,W).cuda()
-        bias_idx = self.get_bias_idx(H,W).cuda()
+        attn_idx = self.get_attn_idx(H,W)
+        bias_idx = self.get_bias_idx(H,W)
         self.register_buffer("attn_idx", attn_idx)
         self.register_buffer("bias_idx",bias_idx)
         
@@ -134,6 +134,7 @@ class NATLayer(nn.Module):
         self.attn.set_input_size(input_size)
         
 def test():
+    print('it is cpu')
     model = NATLayer((28,28),128,4)
     img = torch.rand(2,128,56,56)
     try:
@@ -142,9 +143,10 @@ def test():
         print('error')
         model.set_input_size((56,56))
         print(model(img).shape)
-    print('success')
+    print('cpu_success\n')
 
 def test_cuda():
+    print('it is cuda')
     model = NATLayer((28,28),128,4).cuda()
     img = torch.rand(2,128,56,56).cuda()
     try:
@@ -154,6 +156,7 @@ def test_cuda():
         model.set_input_size((56,56))
         print(model(img).shape)
     print('success')
+    print('cuda_success\n')
         
 if __name__ == '__main__' :
     test()
