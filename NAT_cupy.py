@@ -525,7 +525,7 @@ class NATLayer(nn.Module):
         return x
       
 def test_cuda():
-    model = NATLayer((28,28),128,4).cuda()
+    model = NATLayer(128,4).cuda()
     img = torch.rand(2,128,56,56).cuda()
     print(model(img).shape)
     
