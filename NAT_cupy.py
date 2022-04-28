@@ -251,8 +251,8 @@ __global__ void nh_attn_backward_value(const ${Dtype}* const attn, const ${Dtype
 '''
 
 import torch
-import torch.nn.functional as F
 import torch.nn as nn
+import torch.nn.functional as F
 from timm.models.layers import DropPath, trunc_normal_
 
 import cupy
