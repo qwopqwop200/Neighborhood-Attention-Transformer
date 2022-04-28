@@ -1,3 +1,4 @@
+#This is NAT implemented using cupy.
 kernel_loop = '''
 #define CUDA_KERNEL_LOOP(i, n)                        \
   for (int i = blockIdx.x * blockDim.x + threadIdx.x; \
