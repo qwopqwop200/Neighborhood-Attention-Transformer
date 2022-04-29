@@ -277,7 +277,7 @@ def load_kernel(kernel_name, code, **kwargs):
     kernel_code = cupy.cuda.compile_with_cache(code)
     return kernel_code.get_function(kernel_name)
   
- class nh_attn_q_k(torch.autograd.Function):
+class nh_attn_q_k(torch.autograd.Function):
     @staticmethod
     def forward(ctx, query, key, bias, window_size):
         assert query.dim() == 5 and query.is_cuda
