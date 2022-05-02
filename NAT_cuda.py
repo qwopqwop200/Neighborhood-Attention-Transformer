@@ -1,51 +1,52 @@
 #This is NAT implemented using cupy.
 nh_attn_forward_q_k = '''
 extern "C"
-__global__ void nh_attn_forward_q_k(const ${Dtype}* query, const ${Dtype}* key, const ${Dtype}* bias, ${Dtype}* attn) {
-    CUDA_KERNEL_LOOP(index, ${nthreads}) {
-        int indtmp1 = index/${window_seq_length};
-        const int k = index - indtmp1 * ${window_seq_length};
-        int indtmp2 = indtmp1/${width};
-        const int w = indtmp1 - indtmp2 * ${width};
+__global__ void nh_attn_forward_q_k(const ${Dtype}* query, const ${Dtype}* key, const ${Dtype}* bias, ${Dtype}* attn, \
+                                    const int nthreads, const int height, const int width) {
+    CUDA_KERNEL_LOOP(index, nthreads) {
+        int indtmp1 = index/${window_sq_size};
+        const int k = index - indtmp1 * ${window_sq_size};
+        int indtmp2 = indtmp1/width;
+        const int w = indtmp1 - indtmp2 * width;
         indtmp1 = indtmp2;
-        indtmp2 = indtmp1/${height};
-        const int h = indtmp1 - indtmp2 *${height};
+        indtmp2 = indtmp1/height;
+        const int h = indtmp1 - indtmp2 *height;
         indtmp1 = indtmp2;
         indtmp2 = indtmp1/${num_heads};
         const int n_h = indtmp1 - indtmp2 * ${num_heads};
-        const int b = indtmp2;     
-                
+        const int b = indtmp2;
+
         const int kh = k / ${window_size};
         const int kw = k - kh * ${window_size};
-                
+
         int ph = ${neighborhood_size};
         int pw = ${neighborhood_size};
         int nh = h - ${neighborhood_size};
         int nw = w - ${neighborhood_size};
-        
+
         if (nh < 0){
             nh = 0;
             ph = ${window_size} - 1 - h;
         }
-        else if (h + ${neighborhood_size} >= ${height}){
-            nh = ${height} - ${window_size};
-            ph = ${height} - h - 1;
+        else if (h + ${neighborhood_size} >= height){
+            nh = height - ${window_size};
+            ph = height - h - 1;
         }
-        
+
         if (nw < 0){
             nw = 0;
             pw = ${window_size} - 1 - w;
         }
-        else if (w + ${neighborhood_size} >= ${width}){
-            nw = ${width} - ${window_size};
-            pw = ${width} - w - 1;
+        else if (w + ${neighborhood_size} >= width){
+            nw = width - ${window_size};
+            pw = width - w - 1;
         }
-        
+
         const int batch_idx = b * ${num_heads} + n_h;
-        const int q_idx = ((batch_idx * ${height} + h) * ${width} + w) * ${channels};
-        const int k_idx = ((batch_idx * ${height} + (kh+nh)) * ${width} + (kw+nw)) * ${channels};
+        const int q_idx = ((batch_idx * height + h) * width + w) * ${channels};
+        const int k_idx = ((batch_idx * height + (kh+nh)) * width + (kw+nw)) * ${channels};
         const int b_idx = (n_h * ${bias_size} + (ph+kh)) * ${bias_size} + (pw+kw);
-        
+
         ${Dtype} update_value = 0;
         #pragma unroll
         for (int c=0; c < ${channels}; ++c){
@@ -59,32 +60,33 @@ __global__ void nh_attn_forward_q_k(const ${Dtype}* query, const ${Dtype}* key, 
 
 nh_attn_backward_query = '''
 extern "C"
-__global__ void nh_attn_backward_query(const ${Dtype}* const key, const ${Dtype}* const d_attn, ${Dtype}* const d_query) {
-    CUDA_KERNEL_LOOP(index, ${nthreads}) {
+__global__ void nh_attn_backward_query(const ${Dtype}* const key, const ${Dtype}* const d_attn, ${Dtype}* const d_query, \
+                                       const int nthreads, const int height, const int width) {
+    CUDA_KERNEL_LOOP(index, nthreads) {
         int indtmp1 = index/${channels};
         const int c = index - indtmp1 * ${channels};
-        int indtmp2 = indtmp1/${width};
-        const int w = indtmp1 - indtmp2 * ${width};
+        int indtmp2 = indtmp1/width;
+        const int w = indtmp1 - indtmp2 * width;
         indtmp1 = indtmp2;
-        indtmp2 = indtmp1/${height};
-        const int h = indtmp1 - indtmp2 *${height};
+        indtmp2 = indtmp1/height;
+        const int h = indtmp1 - indtmp2 * height;
         indtmp1 = indtmp2;
         indtmp2 = indtmp1/${num_heads};
         const int n_h = indtmp1 - indtmp2 * ${num_heads};
-        const int b = indtmp2;  
-        
-        int nh = max(h - ${neighborhood_size}, 0) + (h + ${neighborhood_size} >= ${height}) * (${height} - h - ${neighborhood_size} - 1);
-        int nw = max(w - ${neighborhood_size}, 0) + (w + ${neighborhood_size} >= ${width}) * (${width} - w - ${neighborhood_size} - 1);
-        
+        const int b = indtmp2;
+
+        int nh = max(h - ${neighborhood_size}, 0) + (h + ${neighborhood_size} >= height) * (height - h - ${neighborhood_size} - 1);
+        int nw = max(w - ${neighborhood_size}, 0) + (w + ${neighborhood_size} >= width) * (width - w - ${neighborhood_size} - 1);
+
         const int batch_idx = b * ${num_heads} + n_h;
-        int a_idx = ((batch_idx * ${height} + h) * ${width} + w)*${window_seq_length};
-        
+        int a_idx = ((batch_idx * height + h) * width + w)*${window_sq_size};
+
         ${Dtype} update_value = 0;
         #pragma unroll
         for (int xh=nh; xh < nh + ${window_size}; ++xh){
             #pragma unroll
             for (int xw=nw; xw < nw + ${window_size}; ++xw){
-                const int k_idx = (((batch_idx * ${height} + xh) * ${width} + xw) * ${channels} + c);
+                const int k_idx = (((batch_idx * height + xh) * width + xw) * ${channels} + c);
                 update_value += d_attn[a_idx] * key[k_idx];
                 ++a_idx;
             }
@@ -96,32 +98,33 @@ __global__ void nh_attn_backward_query(const ${Dtype}* const key, const ${Dtype}
 
 nh_attn_backward_key = '''
 extern "C"
-__global__ void nh_attn_backward_key(const ${Dtype}* const query, const ${Dtype}* const d_attn, ${Dtype}* const d_key) {
-    CUDA_KERNEL_LOOP(index, ${nthreads}) {
+__global__ void nh_attn_backward_key(const ${Dtype}* const query, const ${Dtype}* const d_attn, ${Dtype}* const d_key, \ 
+                                     const int nthreads, const int height, const int width) {
+    CUDA_KERNEL_LOOP(index, nthreads) {
         int indtmp1 = index/${channels};
         const int c = index - indtmp1 * ${channels};
-        int indtmp2 = indtmp1/${width};
-        const int w = indtmp1 - indtmp2 * ${width};
+        int indtmp2 = indtmp1/width;
+        const int w = indtmp1 - indtmp2 * width;
         indtmp1 = indtmp2;
-        indtmp2 = indtmp1/${height};
-        const int h = indtmp1 - indtmp2 *${height};
+        indtmp2 = indtmp1/height;
+        const int h = indtmp1 - indtmp2 * height;
         indtmp1 = indtmp2;
         indtmp2 = indtmp1/${num_heads};
         const int n_h = indtmp1 - indtmp2 * ${num_heads};
-        const int b = indtmp2;  
-        
-        int nh = max(h - ${neighborhood_size}, 0) + (h + ${neighborhood_size} >= ${height}) * (${height} - h - ${neighborhood_size} - 1);
-        int nw = max(w - ${neighborhood_size}, 0) + (w + ${neighborhood_size} >= ${width}) * (${width} - w - ${neighborhood_size} - 1);
+        const int b = indtmp2;
+
+        int nh = max(h - ${neighborhood_size}, 0) + (h + ${neighborhood_size} >= height) * (height - h - ${neighborhood_size} - 1);
+        int nw = max(w - ${neighborhood_size}, 0) + (w + ${neighborhood_size} >= width) * (width - w - ${neighborhood_size} - 1);
         
         const int batch_idx = b * ${num_heads} + n_h;
-        int a_idx = ((batch_idx * ${height} + h) * ${width} + w)*${window_seq_length};
-        
+        int a_idx = ((batch_idx * height + h) * width + w)*${window_sq_size};
+
         ${Dtype} update_value = 0;
         #pragma unroll
         for (int xh=nh; xh < nh + ${window_size}; ++xh){
             #pragma unroll
             for (int xw=nw; xw < nw + ${window_size}; ++xw){
-                const int k_idx = (((batch_idx * ${height} + xh) * ${width} + xw) * ${channels} + c);
+                const int k_idx = (((batch_idx * height + xh) * width + xw) * ${channels} + c);
                 atomicAdd(&d_key[k_idx], query[index] * d_attn[a_idx]);
                 ++a_idx;
             }
@@ -132,74 +135,75 @@ __global__ void nh_attn_backward_key(const ${Dtype}* const query, const ${Dtype}
 
 nh_attn_backward_bias = '''
 extern "C"
-__global__ void nh_attn_backward_bias(const ${Dtype}* const d_attn, ${Dtype}* const d_bias) {
-      CUDA_KERNEL_LOOP(index, ${nthreads}) {
-        int indtmp1 = index/${window_seq_length};
-        const int k = index - indtmp1 * ${window_seq_length};
-        int indtmp2 = indtmp1/${width};
-        const int w = indtmp1 - indtmp2 * ${width};
+__global__ void nh_attn_backward_bias(const ${Dtype}* const d_attn, ${Dtype}* const d_bias, \
+                                      const int nthreads, const int height, const int width) {
+      CUDA_KERNEL_LOOP(index, nthreads) {
+        int indtmp1 = index/${window_sq_size};
+        const int k = index - indtmp1 * ${window_sq_size};
+        int indtmp2 = indtmp1/width;
+        const int w = indtmp1 - indtmp2 * width;
         indtmp1 = indtmp2;
-        indtmp2 = indtmp1/${height};
-        const int h = indtmp1 - indtmp2 *${height};
+        indtmp2 = indtmp1/height;
+        const int h = indtmp1 - indtmp2 *height;
         indtmp1 = indtmp2;
         indtmp2 = indtmp1/${num_heads};
         const int n_h = indtmp1 - indtmp2 * ${num_heads};
-        
+
         const int kh = k / ${window_size};
         const int kw = k - kh * ${window_size};
-        
+
         int ph = ${neighborhood_size};
         int pw = ${neighborhood_size};
-        
+
         if (h < ${neighborhood_size}){
             ph = ${window_size} - 1 - h;
         }
-        else if (h + ${neighborhood_size} >= ${height}){
-            ph = ${height} - h - 1;
+        else if (h + ${neighborhood_size} >= height){
+            ph = height - h - 1;
         }
-        
+
         if (w < ${neighborhood_size}){
-            pw = ${window_size} - 1 - w;
+            pw = window_size - 1 - w;
         }
-        else if (w + ${neighborhood_size} >= ${width}){
-            pw = ${width} - w - 1;
+        else if (w + ${neighborhood_size} >= width){
+            pw = width - w - 1;
         }
-        
+
         const int b_idx = (n_h * ${bias_size} + (ph+kh)) * ${bias_size} + (pw+kw);
-        
+
         atomicAdd(&d_bias[b_idx], d_attn[index]);
     }
 }
 '''
 nh_attn_forward_attn_v = '''
 extern "C"
-__global__ void nh_attn_forward_attn_v(const ${Dtype}* attn, const ${Dtype}* value, ${Dtype}* out) {
-    CUDA_KERNEL_LOOP(index, ${nthreads}) {
+__global__ void nh_attn_forward_attn_v(const ${Dtype}* attn, const ${Dtype}* value, ${Dtype}* out, \
+                                       const int nthreads, const int height, const int width) {
+    CUDA_KERNEL_LOOP(index, nthreads) {
         int indtmp1 = index/${channels};
         const int c = index - indtmp1 * ${channels};
-        int indtmp2 = indtmp1/${width};
-        const int w = indtmp1 - indtmp2 * ${width};
+        int indtmp2 = indtmp1/width;
+        const int w = indtmp1 - indtmp2 * width;
         indtmp1 = indtmp2;
-        indtmp2 = indtmp1/${height};
-        const int h = indtmp1 - indtmp2 *${height};
+        indtmp2 = indtmp1/height;
+        const int h = indtmp1 - indtmp2 * height;
         indtmp1 = indtmp2;
         indtmp2 = indtmp1/${num_heads};
         const int n_h = indtmp1 - indtmp2 * ${num_heads};
-        const int b = indtmp2;  
-        
-        int nh = max(h - ${neighborhood_size}, 0) + (h + ${neighborhood_size} >= ${height}) * (${height} - h - ${neighborhood_size} - 1);
-        int nw = max(w - ${neighborhood_size}, 0) + (w + ${neighborhood_size} >= ${width}) * (${width} - w - ${neighborhood_size} - 1);
-        
-        
+        const int b = indtmp2;
+
+        int nh = max(h - ${neighborhood_size}, 0) + (h + ${neighborhood_size} >= height) * (height - h - ${neighborhood_size} - 1);
+        int nw = max(w - ${neighborhood_size}, 0) + (w + ${neighborhood_size} >= width) * (width - w - ${neighborhood_size} - 1);
+
         const int batch_idx = b * ${num_heads} + n_h;
-        int a_idx = ((batch_idx * ${height} + h) * ${width} + w)*${window_seq_length};
-        
+        int a_idx = ((batch_idx * height + h) * width + w)*${window_sq_size};
+
         ${Dtype} update_value = 0;
         #pragma unroll
         for (int xh=nh; xh < nh + ${window_size}; ++xh){
             #pragma unroll
             for (int xw=nw; xw < nw + ${window_size}; ++xw){
-                const int v_idx = (((batch_idx * ${height} + xh) * ${width} + xw) * ${channels} + c);
+                const int v_idx = (((batch_idx * height + xh) * width + xw) * ${channels} + c);
                 update_value += attn[a_idx] * value[v_idx];
                 ++a_idx;
             }
@@ -210,30 +214,31 @@ __global__ void nh_attn_forward_attn_v(const ${Dtype}* attn, const ${Dtype}* val
 '''
 nh_attn_backward_attn = '''
 extern "C"
-__global__ void nh_attn_backward_attn(const ${Dtype}* const value, const ${Dtype}* const d_out, ${Dtype}* const d_attn) {
-    CUDA_KERNEL_LOOP(index, ${nthreads}) {
-        int indtmp1 = index/${window_seq_length};
-        const int k = index - indtmp1 * ${window_seq_length};
-        int indtmp2 = indtmp1/${width};
-        const int w = indtmp1 - indtmp2 * ${width};
+__global__ void nh_attn_backward_attn(const ${Dtype}* const value, const ${Dtype}* const d_out, ${Dtype}* const d_attn, \
+                                      const int nthreads, const int height, const int width) {
+    CUDA_KERNEL_LOOP(index, nthreads) {
+        int indtmp1 = index/${window_sq_size};
+        const int k = index - indtmp1 * ${window_sq_size};
+        int indtmp2 = indtmp1/width;
+        const int w = indtmp1 - indtmp2 * width;
         indtmp1 = indtmp2;
-        indtmp2 = indtmp1/${height};
-        const int h = indtmp1 - indtmp2 *${height};
+        indtmp2 = indtmp1/height;
+        const int h = indtmp1 - indtmp2 *height;
         indtmp1 = indtmp2;
         indtmp2 = indtmp1/${num_heads};
         const int n_h = indtmp1 - indtmp2 * ${num_heads};
-        const int b = indtmp2;     
-        
+        const int b = indtmp2;
+
         const int kh = k / ${window_size};
         const int kw = k - kh * ${window_size};
-        
-        int nh = max(h - ${neighborhood_size}, 0) + (h + ${neighborhood_size} >= ${height}) * (${height} - h - ${neighborhood_size} - 1);
-        int nw = max(w - ${neighborhood_size}, 0) + (w + ${neighborhood_size} >= ${width}) * (${width} - w - ${neighborhood_size} - 1);
+
+        int nh = max(h - ${neighborhood_size}, 0) + (h + ${neighborhood_size} >= height) * (height - h - ${neighborhood_size} - 1);
+        int nw = max(w - ${neighborhood_size}, 0) + (w + ${neighborhood_size} >= width) * (width - w - ${neighborhood_size} - 1);
         
         const int batch_idx = b * ${num_heads} + n_h;
-        const int o_idx = ((batch_idx * ${height} + h) * ${width} + w) * ${channels};
-        const int v_idx = ((batch_idx * ${height} + (nh+kh))* ${width} + (nw+kw)) * ${channels};
-        
+        const int o_idx = ((batch_idx * height + h) * width + w) * ${channels};
+        const int v_idx = ((batch_idx * height + (nh+kh))* width + (nw+kw)) * ${channels};
+
         ${Dtype} update_value = 0;
         #pragma unroll
         for (int c=0; c < ${channels}; ++c){
@@ -246,32 +251,33 @@ __global__ void nh_attn_backward_attn(const ${Dtype}* const value, const ${Dtype
 
 nh_attn_backward_value = '''
 extern "C"
-__global__ void nh_attn_backward_value(const ${Dtype}* const attn, const ${Dtype}* const d_out, ${Dtype}* const d_value) {
-    CUDA_KERNEL_LOOP(index, ${nthreads}) {
+__global__ void nh_attn_backward_value(const ${Dtype}* const attn, const ${Dtype}* const d_out, ${Dtype}* const d_value \
+                                       const int nthreads, const int height, const int width) {
+    CUDA_KERNEL_LOOP(index, nthreads) {
         int indtmp1 = index/${channels};
         const int c = index - indtmp1 * ${channels};
-        int indtmp2 = indtmp1/${width};
-        const int w = indtmp1 - indtmp2 * ${width};
+        int indtmp2 = indtmp1/width;
+        const int w = indtmp1 - indtmp2 * width;
         indtmp1 = indtmp2;
-        indtmp2 = indtmp1/${height};
-        const int h = indtmp1 - indtmp2 *${height};
+        indtmp2 = indtmp1/height;
+        const int h = indtmp1 - indtmp2 * height;
         indtmp1 = indtmp2;
         indtmp2 = indtmp1/${num_heads};
         const int n_h = indtmp1 - indtmp2 * ${num_heads};
-        const int b = indtmp2;        
+        const int b = indtmp2;
+
+        int nh = max(h - ${neighborhood_size}, 0) + (h + ${neighborhood_size} >= height) * (height - h - ${neighborhood_size} - 1);
+        int nw = max(w - ${neighborhood_size}, 0) + (w + ${neighborhood_size} >= width) * (width - w - ${neighborhood_size} - 1);
         
-        int nh = max(h - ${neighborhood_size}, 0) + (h + ${neighborhood_size} >= ${height}) * (${height} - h - ${neighborhood_size} - 1);
-        int nw = max(w - ${neighborhood_size}, 0) + (w + ${neighborhood_size} >= ${width}) * (${width} - w - ${neighborhood_size} - 1);
-        
-        const int batch_idx = b * ${num_heads} + n_h;
-        int a_idx = ((batch_idx * ${height} + h) * ${width} + w)*${window_seq_length};
-        
+        const int batch_idx = b * num_heads + n_h;
+        int a_idx = ((batch_idx * height + h) * width + w)*${window_sq_size};
+
         ${Dtype} update_value = 0;
         #pragma unroll
         for (int xh=nh; xh < nh + ${window_size}; ++xh){
             #pragma unroll
             for (int xw=nw; xw < nw + ${window_size}; ++xw){
-                const int v_idx = (((batch_idx * ${height} + xh) * ${width} + xw) * ${channels} + c);
+                const int v_idx = (((batch_idx * height + xh) * width + xw) * ${channels} + c);
                 atomicAdd(&d_value[v_idx], attn[a_idx] * d_out[index]);
                 ++a_idx;
             }
@@ -313,177 +319,176 @@ def Dtype(t):
         return 'float'
     elif isinstance(t, torch.cuda.DoubleTensor):
         return 'double'
-    
+
 @cupy._util.memoize(for_each_device=True)
 def load_kernel(kernel_name, code, **kwargs):
     code = kernel_loop + code
     code = Template(code).substitute(**kwargs)
     return cupy.RawKernel(code,kernel_name)
-  
-class nh_attn_q_k(torch.autograd.Function):
+
+class nh_attn_function_set():
+    def __init__(self,num_heads, channels,window_size):
+        self.opt = dict(num_heads=num_heads,channels=channels,window_size=window_size,
+                   window_sq_size = window_size**2, bias_size = (2*window_size-1),
+                   neighborhood_size= window_size//2)
+        self.kernel = {}
+        self.kernel['nh_attn_forward_q_k'] = self.load_kernel_detypes('nh_attn_forward_q_k', nh_attn_forward_q_k, self.opt)
+        self.kernel['nh_attn_backward_query'] = self.load_kernel_detypes('nh_attn_backward_query', nh_attn_backward_query, self.opt)
+        self.kernel['nh_attn_backward_key'] = self.load_kernel_detypes('nh_attn_backward_key', nh_attn_backward_key, self.opt)
+        self.kernel['nh_attn_backward_bias'] = self.load_kernel_detypes('nh_attn_backward_bias', nh_attn_backward_bias, self.opt)
+        self.kernel['nh_attn_forward_attn_v'] = self.load_kernel_detypes('nh_attn_forward_attn_v', nh_attn_forward_attn_v, self.opt)
+        self.kernel['nh_attn_backward_attn'] = self.load_kernel_detypes('nh_attn_backward_attn', nh_attn_backward_attn, self.opt)
+        self.kernel['nh_attn_backward_value'] = self.load_kernel_detypes('nh_attn_backward_value', nh_attn_backward_value, self.opt)
+        
+    def __call__(self,mode,dtype,inputs):
+        self.kernel[mode][dtype](**inputs)
+        
+    def load_kernel_detypes(self,kernel_name, code, opt):
+        kernel_dict = {}
+        opt['Dtype'] = 'float16'        
+        kernel_dict['float16'] = load_kernel(kernel_name, code, **opt)
+        opt['Dtype'] = 'float'
+        kernel_dict['float'] = load_kernel(kernel_name, code, **opt)
+        opt['Dtype'] = 'double'
+        kernel_dict['double'] = load_kernel(kernel_name, code, **opt)
+        return kernel_dict     
+    
+        
+class nh_attn_q_k(torch.autograd.Function):    
     @staticmethod
     @custom_fwd(cast_inputs=torch.float16)
-    def forward(ctx, query, key, bias, window_size):
+    def forward(ctx, query, key, bias,function_set):
         query = query.contiguous()
-        key = key.contiguous()     
+        key = key.contiguous()
         bias = bias.contiguous()
-        
+
         assert query.dim() == 5 and query.is_cuda
         assert key.dim() == 5 and key.is_cuda
         assert bias.dim() == 3 and bias.is_cuda
-        
+
         batch_size, num_heads, height, width ,channels = query.size()
-        attn = torch.zeros(batch_size, num_heads, height, width,window_size**2,dtype=query.dtype,device=query.device)
-        
+        attn = torch.zeros(batch_size, num_heads, height, width,function_set.opt['window_sq_size'],dtype=query.dtype,device=query.device)
+
         with torch.cuda.device_of(query):
             n = attn.numel()
-            opt = dict(Dtype=Dtype(query), nthreads=n,
-                       batch=batch_size, num_heads=num_heads, height=height, width=width, channels=channels,
-                       window_size=window_size, window_seq_length=window_size**2, bias_size=(2*window_size-1),
-                       neighborhood_size=window_size//2)
-            f = load_kernel('nh_attn_forward_q_k', nh_attn_forward_q_k, **opt)
-            
-            f(block=(CUDA_NUM_THREADS,1,1),
-              grid=(GET_BLOCKS(n),1,1),
-              args=[query.data_ptr(), key.data_ptr(), bias.data_ptr(), attn.data_ptr()],
-              stream=Stream(ptr=torch.cuda.current_stream().cuda_stream))
-            
+            inputs = dict(block=(CUDA_NUM_THREADS,1,1),
+                          grid=(GET_BLOCKS(n),1,1),
+                          args=[query.data_ptr(), key.data_ptr(), bias.data_ptr(), attn.data_ptr(),
+                                n,height,width],
+                          stream=Stream(ptr=torch.cuda.current_stream().cuda_stream))
+            function_set('nh_attn_forward_q_k', Dtype(query), inputs)
+
         ctx.save_for_backward(query, key, bias)
-        ctx.window_size = window_size
+        ctx.function_set = function_set
         return attn
-    
+
     @staticmethod
     @custom_bwd
     def backward(ctx, d_attn):
         d_attn = d_attn.contiguous()
-        
+
         assert d_attn.is_cuda
-        
+
         query, key, bias = ctx.saved_tensors
-        window_size = ctx.window_size
-        
+        function_set = ctx.function_set
+
         batch_size, num_heads, height, width ,channels = query.size()
         d_query, d_key, d_bias = None, None, None
-        
+
         with torch.cuda.device_of(d_attn):
             if ctx.needs_input_grad[0]:
                 d_query = torch.zeros_like(query)
                 n = d_query.numel()
-                opt = dict(Dtype=Dtype(d_attn), nthreads=n,
-                           batch=batch_size, num_heads=num_heads, height=height, width=width, channels=channels,
-                           window_size=window_size, window_seq_length=window_size**2, bias_size=(2*window_size-1),
-                           neighborhood_size=window_size//2)
-                
-                f = load_kernel('nh_attn_backward_query',nh_attn_backward_query, **opt)
-                f(block=(CUDA_NUM_THREADS,1,1),
-                  grid=(GET_BLOCKS(n),1,1),
-                  args=[key.data_ptr(), d_attn.data_ptr(), d_query.data_ptr()],
-                  stream=Stream(ptr=torch.cuda.current_stream().cuda_stream))
-                
+                inputs = dict(block=(CUDA_NUM_THREADS,1,1),
+                              grid=(GET_BLOCKS(n),1,1),
+                              args=[key.data_ptr(), d_attn.data_ptr(), d_query.data_ptr(),
+                                    n,height,width],
+                              stream=Stream(ptr=torch.cuda.current_stream().cuda_stream))
+                function_set('nh_attn_backward_query',Dtype(d_query), inputs)
+
             if ctx.needs_input_grad[1]:
                 d_key = torch.zeros_like(key)
                 n = d_key.numel()
-                opt = dict(Dtype=Dtype(d_attn), nthreads=n,
-                           batch=batch_size, num_heads=num_heads, height=height, width=width, channels=channels,
-                           window_size=window_size, window_seq_length=window_size**2, bias_size=(2*window_size-1),
-                           neighborhood_size=window_size//2)
-                
-                f = load_kernel('nh_attn_backward_key',nh_attn_backward_key, **opt)
-                f(block=(CUDA_NUM_THREADS,1,1),
-                  grid=(GET_BLOCKS(n),1,1),
-                  args=[query.data_ptr(), d_attn.data_ptr(), d_key.data_ptr()],
-                  stream=Stream(ptr=torch.cuda.current_stream().cuda_stream))
-                
+                inputs = dict(block=(CUDA_NUM_THREADS,1,1),
+                              grid=(GET_BLOCKS(n),1,1),
+                              args=[query.data_ptr(), d_attn.data_ptr(), d_key.data_ptr(),
+                                    n,height,width],
+                              stream=Stream(ptr=torch.cuda.current_stream().cuda_stream))
+                              
+                function_set('nh_attn_backward_key',Dtype(d_key), inputs)
+
             if ctx.needs_input_grad[2]:
                 d_bias = torch.zeros_like(bias)
                 n = d_attn.numel()
-                opt = dict(Dtype=Dtype(d_attn), nthreads=n,
-                           batch=batch_size, num_heads=num_heads, height=height, width=width, channels=channels,
-                           window_size=window_size, window_seq_length=window_size**2, bias_size=(2*window_size-1),
-                           neighborhood_size=window_size//2)
-                
-                f = load_kernel('nh_attn_backward_bias',nh_attn_backward_bias, **opt)
-                f(block=(CUDA_NUM_THREADS,1,1),
-                  grid=(GET_BLOCKS(n),1,1),
-                  args=[d_attn.data_ptr(), d_bias.data_ptr()],
-                  stream=Stream(ptr=torch.cuda.current_stream().cuda_stream))  
-
+                inputs = dict(block=(CUDA_NUM_THREADS,1,1),
+                              grid=(GET_BLOCKS(n),1,1),
+                              args=[d_attn.data_ptr(), d_bias.data_ptr(),
+                                    n,height,width],
+                              stream=Stream(ptr=torch.cuda.current_stream().cuda_stream))
+                function_set('nh_attn_backward_bias',Dtype(d_bias), inputs)
         return d_query, d_key, d_bias, None
 
 class nh_attn_attn_v(torch.autograd.Function):
     @staticmethod
     @custom_fwd(cast_inputs=torch.float16)
-    def forward(ctx,attn,value,window_size): 
+    def forward(ctx,attn,value,function_set):
         attn = attn.contiguous()
-        value = value.contiguous()        
-        
+        value = value.contiguous()
+
         assert attn.dim() == 5 and attn.is_cuda
         assert value.dim() == 5 and value.is_cuda
-        
+
         batch_size, num_heads, height, width ,channels = value.size()
         out = torch.zeros_like(value)
-        
+
         with torch.cuda.device_of(attn):
             n = out.numel()
-            opt = dict(Dtype=Dtype(attn), nthreads=n,
-                       batch=batch_size, num_heads=num_heads, height=height, width=width, channels=channels,
-                       window_size=window_size, window_seq_length=window_size**2, bias_size=(2*window_size-1),
-                       neighborhood_size=window_size//2)
-            
-            f = load_kernel('nh_attn_forward_attn_v', nh_attn_forward_attn_v, **opt)
-            f(block=(CUDA_NUM_THREADS,1,1),
-              grid=(GET_BLOCKS(n),1,1),
-              args=[attn.data_ptr(), value.data_ptr(), out.data_ptr()],
-              stream=Stream(ptr=torch.cuda.current_stream().cuda_stream))
-            
+            inputs = dict(block=(CUDA_NUM_THREADS,1,1),
+                          grid=(GET_BLOCKS(n),1,1),
+                          args=[attn.data_ptr(), value.data_ptr(), out.data_ptr(),
+                                n,height,width],
+                          stream=Stream(ptr=torch.cuda.current_stream().cuda_stream))
+            function_set('nh_attn_forward_attn_v',Dtype(out), inputs)
         ctx.save_for_backward(attn, value)
-        ctx.window_size = window_size
+        ctx.function_set = function_set
         return out
-    
+
     @staticmethod
     @custom_bwd
     def backward(ctx, d_out):
         d_out = d_out.contiguous()
-        
+
         assert d_out.is_cuda
-        
+
         attn, value = ctx.saved_tensors
-        window_size = ctx.window_size
-        
+        function_set = ctx.function_set
+
         batch_size, num_heads, height, width ,channels = value.size()
         d_attn, d_value = None, None
-        
+
         with torch.cuda.device_of(d_out):
             if ctx.needs_input_grad[0]:
                 d_attn = torch.zeros_like(attn)
                 n = d_attn.numel()
-                opt = dict(Dtype=Dtype(d_out), nthreads=n,
-                           batch=batch_size, num_heads=num_heads, height=height, width=width, channels=channels,
-                           window_size=window_size, window_seq_length=window_size**2, bias_size=(2*window_size-1),
-                           neighborhood_size=window_size//2)
-                
-                f = load_kernel('nh_attn_backward_attn',nh_attn_backward_attn, **opt)
-                f(block=(CUDA_NUM_THREADS,1,1),
-                  grid=(GET_BLOCKS(n),1,1),
-                  args=[value.data_ptr(), d_out.data_ptr(), d_attn.data_ptr()],
-                  stream=Stream(ptr=torch.cuda.current_stream().cuda_stream))
+                inputs = dict(block=(CUDA_NUM_THREADS,1,1),
+                              grid=(GET_BLOCKS(n),1,1),
+                              args=[value.data_ptr(), d_out.data_ptr(), d_attn.data_ptr(),
+                                    n,height,width],
+                              stream=Stream(ptr=torch.cuda.current_stream().cuda_stream))
+                function_set('nh_attn_backward_attn',Dtype(d_attn), inputs)
 
             if ctx.needs_input_grad[1]:
                 d_value = torch.zeros_like(value)
                 n = d_value.numel()
-                opt = dict(Dtype=Dtype(d_out), nthreads=n,
-                           batch=batch_size, num_heads=num_heads, height=height, width=width, channels=channels,
-                           window_size=window_size, window_seq_length=window_size**2, bias_size=(2*window_size-1),
-                           neighborhood_size=window_size//2)
-                
-                f = load_kernel('nh_attn_backward_value',nh_attn_backward_value, **opt)
-                f(block=(CUDA_NUM_THREADS,1,1),
-                  grid=(GET_BLOCKS(n),1,1),
-                  args=[attn.data_ptr(), d_out.data_ptr(), d_value.data_ptr()],
-                  stream=Stream(ptr=torch.cuda.current_stream().cuda_stream))
-       
+                inputs = dict(block=(CUDA_NUM_THREADS,1,1),
+                              grid=(GET_BLOCKS(n),1,1),
+                              args=[attn.data_ptr(), d_out.data_ptr(), d_value.data_ptr(),
+                                    n,height,width],
+                              stream=Stream(ptr=torch.cuda.current_stream().cuda_stream))
+                function_set('nh_attn_backward_value',Dtype(d_value), inputs)
+
         return d_attn, d_value,None
-      
+    
 class NeighborhoodAttention(nn.Module):
     def __init__(self, dim, kernel_size, num_heads,qkv_bias=True, qk_scale=None, attn_drop=0., proj_drop=0.):
         super().__init__()
@@ -492,7 +497,8 @@ class NeighborhoodAttention(nn.Module):
         self.head_dim = dim // self.num_heads
         self.scale = qk_scale or self.head_dim ** -0.5
         self.kernel_size = kernel_size
-
+        
+        self.fuction_set = nh_attn_function_set(num_heads, self.head_dim, kernel_size)
         self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
         self.proj = nn.Linear(dim, dim)
         self.attn_drop = nn.Dropout(attn_drop)
@@ -526,20 +532,20 @@ class NeighborhoodAttention(nn.Module):
         if pad_r or pad_b:
             x = x[:, :Ho, :Wo, :]
         return self.proj_drop(self.proj(x))
-    
+
     def nh_attn(self,input_1, input_2,mode='q_k'):
         if input_1.is_cuda and input_2.is_cuda and self.rpb.is_cuda:
             if mode.lower() == 'q_k':
-                attn = nh_attn_q_k.apply(input_1, input_2,self.rpb,self.kernel_size)
+                attn = nh_attn_q_k.apply(input_1, input_2,self.rpb,self.fuction_set)
                 return attn
             elif mode.lower() == 'attn_v':
-                out = nh_attn_attn_v.apply(input_1, input_2,self.kernel_size)
+                out = nh_attn_attn_v.apply(input_1, input_2,self.fuction_set)
                 return out
             else:
                 raise NotImplementedError
         else:
             raise NotImplementedError
-            
+
 model_urls = {
     "nat_mini_1k": "http://ix.cs.uoregon.edu/~alih/nat/checkpoints/CLS/nat_mini.pth",
     "nat_tiny_1k": "http://ix.cs.uoregon.edu/~alih/nat/checkpoints/CLS/nat_tiny.pth",
@@ -606,7 +612,7 @@ class NATLayer(nn.Module):
         self.dim = dim
         self.num_heads = num_heads
         self.mlp_ratio = mlp_ratio
-        
+
         self.norm1 = norm_layer(dim)
         self.attn = NeighborhoodAttention(
             dim, kernel_size=kernel_size, num_heads=num_heads,
@@ -751,7 +757,7 @@ class NAT(nn.Module):
 @register_model
 def nat_mini(pretrained=False, **kwargs):
     model = NAT(depths=[3, 4, 6, 5], num_heads=[2, 4, 8, 16], embed_dim=64, mlp_ratio=3,
-                 drop_path_rate=0.2, kernel_size=7, **kwargs)
+                drop_path_rate=0.2, kernel_size=7, **kwargs)
     if pretrained:
         url = model_urls['nat_mini_1k']
         checkpoint = torch.hub.load_state_dict_from_url(url=url, map_location="cpu")
@@ -794,7 +800,7 @@ def nat_base(pretrained=False, **kwargs):
 def test():
     model = nat_mini(True).cuda()
     model = model.eval()
-    img = torch.ones(batch_size,3,224,224).cuda()
+    img = torch.ones(32,3,224,224).cuda()
     model(img)
     
 if __name__ == '__main__' :
