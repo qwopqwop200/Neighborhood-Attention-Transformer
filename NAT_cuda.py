@@ -1,5 +1,4 @@
 #This is NAT implemented using cupy.
-#This is NAT implemented using cupy.
 nh_attn_forward_q_k = '''
 extern "C"
 __global__ void nh_attn_forward_q_k(const ${Dtype}* query, const ${Dtype}* key, const ${Dtype}* bias, ${Dtype}* attn, \
