@@ -1,4 +1,5 @@
 #This is NAT implemented using cupy.
+#This is NAT implemented using cupy.
 nh_attn_forward_q_k = '''
 extern "C"
 __global__ void nh_attn_forward_q_k(const ${Dtype}* query, const ${Dtype}* key, const ${Dtype}* bias, ${Dtype}* attn, \
@@ -15,15 +16,12 @@ __global__ void nh_attn_forward_q_k(const ${Dtype}* query, const ${Dtype}* key, 
         indtmp2 = indtmp1/${num_heads};
         const int n_h = indtmp1 - indtmp2 * ${num_heads};
         const int b = indtmp2;
-
         const int kh = k / ${window_size};
         const int kw = k - kh * ${window_size};
-
         int ph = ${neighborhood_size};
         int pw = ${neighborhood_size};
         int nh = h - ${neighborhood_size};
         int nw = w - ${neighborhood_size};
-
         if (nh < 0){
             nh = 0;
             ph = ${window_size} - 1 - h;
@@ -32,7 +30,6 @@ __global__ void nh_attn_forward_q_k(const ${Dtype}* query, const ${Dtype}* key, 
             nh = height - ${window_size};
             ph = height - h - 1;
         }
-
         if (nw < 0){
             nw = 0;
             pw = ${window_size} - 1 - w;
@@ -41,12 +38,10 @@ __global__ void nh_attn_forward_q_k(const ${Dtype}* query, const ${Dtype}* key, 
             nw = width - ${window_size};
             pw = width - w - 1;
         }
-
         const int batch_idx = b * ${num_heads} + n_h;
         const int q_idx = ((batch_idx * height + h) * width + w) * ${channels};
         const int k_idx = ((batch_idx * height + (kh+nh)) * width + (kw+nw)) * ${channels};
         const int b_idx = (n_h * ${bias_size} + (ph+kh)) * ${bias_size} + (pw+kw);
-
         ${Dtype} update_value = 0;
         #pragma unroll
         for (int c=0; c < ${channels}; ++c){
@@ -74,13 +69,10 @@ __global__ void nh_attn_backward_query(const ${Dtype}* const key, const ${Dtype}
         indtmp2 = indtmp1/${num_heads};
         const int n_h = indtmp1 - indtmp2 * ${num_heads};
         const int b = indtmp2;
-
         int nh = max(h - ${neighborhood_size}, 0) + (h + ${neighborhood_size} >= height) * (height - h - ${neighborhood_size} - 1);
         int nw = max(w - ${neighborhood_size}, 0) + (w + ${neighborhood_size} >= width) * (width - w - ${neighborhood_size} - 1);
-
         const int batch_idx = b * ${num_heads} + n_h;
         int a_idx = ((batch_idx * height + h) * width + w)*${window_sq_size};
-
         ${Dtype} update_value = 0;
         #pragma unroll
         for (int xh=nh; xh < nh + ${window_size}; ++xh){
@@ -112,13 +104,11 @@ __global__ void nh_attn_backward_key(const ${Dtype}* const query, const ${Dtype}
         indtmp2 = indtmp1/${num_heads};
         const int n_h = indtmp1 - indtmp2 * ${num_heads};
         const int b = indtmp2;
-
         int nh = max(h - ${neighborhood_size}, 0) + (h + ${neighborhood_size} >= height) * (height - h - ${neighborhood_size} - 1);
         int nw = max(w - ${neighborhood_size}, 0) + (w + ${neighborhood_size} >= width) * (width - w - ${neighborhood_size} - 1);
         
         const int batch_idx = b * ${num_heads} + n_h;
         int a_idx = ((batch_idx * height + h) * width + w)*${window_sq_size};
-
         ${Dtype} update_value = 0;
         #pragma unroll
         for (int xh=nh; xh < nh + ${window_size}; ++xh){
@@ -148,29 +138,23 @@ __global__ void nh_attn_backward_bias(const ${Dtype}* const d_attn, ${Dtype}* co
         indtmp1 = indtmp2;
         indtmp2 = indtmp1/${num_heads};
         const int n_h = indtmp1 - indtmp2 * ${num_heads};
-
         const int kh = k / ${window_size};
         const int kw = k - kh * ${window_size};
-
         int ph = ${neighborhood_size};
         int pw = ${neighborhood_size};
-
         if (h < ${neighborhood_size}){
             ph = ${window_size} - 1 - h;
         }
         else if (h + ${neighborhood_size} >= height){
             ph = height - h - 1;
         }
-
         if (w < ${neighborhood_size}){
             pw = window_size - 1 - w;
         }
         else if (w + ${neighborhood_size} >= width){
             pw = width - w - 1;
         }
-
         const int b_idx = (n_h * ${bias_size} + (ph+kh)) * ${bias_size} + (pw+kw);
-
         atomicAdd(&d_bias[b_idx], d_attn[index]);
     }
 }
@@ -191,13 +175,10 @@ __global__ void nh_attn_forward_attn_v(const ${Dtype}* attn, const ${Dtype}* val
         indtmp2 = indtmp1/${num_heads};
         const int n_h = indtmp1 - indtmp2 * ${num_heads};
         const int b = indtmp2;
-
         int nh = max(h - ${neighborhood_size}, 0) + (h + ${neighborhood_size} >= height) * (height - h - ${neighborhood_size} - 1);
         int nw = max(w - ${neighborhood_size}, 0) + (w + ${neighborhood_size} >= width) * (width - w - ${neighborhood_size} - 1);
-
         const int batch_idx = b * ${num_heads} + n_h;
         int a_idx = ((batch_idx * height + h) * width + w)*${window_sq_size};
-
         ${Dtype} update_value = 0;
         #pragma unroll
         for (int xh=nh; xh < nh + ${window_size}; ++xh){
@@ -228,17 +209,14 @@ __global__ void nh_attn_backward_attn(const ${Dtype}* const value, const ${Dtype
         indtmp2 = indtmp1/${num_heads};
         const int n_h = indtmp1 - indtmp2 * ${num_heads};
         const int b = indtmp2;
-
         const int kh = k / ${window_size};
         const int kw = k - kh * ${window_size};
-
         int nh = max(h - ${neighborhood_size}, 0) + (h + ${neighborhood_size} >= height) * (height - h - ${neighborhood_size} - 1);
         int nw = max(w - ${neighborhood_size}, 0) + (w + ${neighborhood_size} >= width) * (width - w - ${neighborhood_size} - 1);
         
         const int batch_idx = b * ${num_heads} + n_h;
         const int o_idx = ((batch_idx * height + h) * width + w) * ${channels};
         const int v_idx = ((batch_idx * height + (nh+kh))* width + (nw+kw)) * ${channels};
-
         ${Dtype} update_value = 0;
         #pragma unroll
         for (int c=0; c < ${channels}; ++c){
@@ -265,13 +243,11 @@ __global__ void nh_attn_backward_value(const ${Dtype}* const attn, const ${Dtype
         indtmp2 = indtmp1/${num_heads};
         const int n_h = indtmp1 - indtmp2 * ${num_heads};
         const int b = indtmp2;
-
         int nh = max(h - ${neighborhood_size}, 0) + (h + ${neighborhood_size} >= height) * (height - h - ${neighborhood_size} - 1);
         int nw = max(w - ${neighborhood_size}, 0) + (w + ${neighborhood_size} >= width) * (width - w - ${neighborhood_size} - 1);
         
         const int batch_idx = b * num_heads + n_h;
         int a_idx = ((batch_idx * height + h) * width + w)*${window_sq_size};
-
         ${Dtype} update_value = 0;
         #pragma unroll
         for (int xh=nh; xh < nh + ${window_size}; ++xh){
@@ -303,22 +279,12 @@ from timm.models.layers import trunc_normal_, DropPath
 from timm.models.registry import register_model
 
 import cupy
-from collections import namedtuple
 from string import Template
 
 CUDA_NUM_THREADS = 1024
-Stream = namedtuple('Stream', ['ptr'])
 
 def GET_BLOCKS(N):
     return (N + CUDA_NUM_THREADS - 1) // CUDA_NUM_THREADS
-
-def Dtype(t):
-    if isinstance(t, torch.cuda.HalfTensor):
-        return 'float16'
-    elif isinstance(t, torch.cuda.FloatTensor):
-        return 'float'
-    elif isinstance(t, torch.cuda.DoubleTensor):
-        return 'double'
 
 @cupy._util.memoize(for_each_device=True)
 def load_kernel(kernel_name, code, **kwargs):
@@ -332,162 +298,151 @@ class nh_attn_function_set():
                    window_sq_size = window_size**2, bias_size = (2*window_size-1),
                    neighborhood_size= window_size//2)
         self.kernel = {}
-        self.kernel['nh_attn_forward_q_k'] = self.load_kernel_detypes('nh_attn_forward_q_k', nh_attn_forward_q_k, self.opt)
-        self.kernel['nh_attn_backward_query'] = self.load_kernel_detypes('nh_attn_backward_query', nh_attn_backward_query, self.opt)
-        self.kernel['nh_attn_backward_key'] = self.load_kernel_detypes('nh_attn_backward_key', nh_attn_backward_key, self.opt)
-        self.kernel['nh_attn_backward_bias'] = self.load_kernel_detypes('nh_attn_backward_bias', nh_attn_backward_bias, self.opt)
-        self.kernel['nh_attn_forward_attn_v'] = self.load_kernel_detypes('nh_attn_forward_attn_v', nh_attn_forward_attn_v, self.opt)
-        self.kernel['nh_attn_backward_attn'] = self.load_kernel_detypes('nh_attn_backward_attn', nh_attn_backward_attn, self.opt)
-        self.kernel['nh_attn_backward_value'] = self.load_kernel_detypes('nh_attn_backward_value', nh_attn_backward_value, self.opt)
+        self.kernel['nh_attn_forward_q_k'] = self.load_kernel_dtypes('nh_attn_forward_q_k', nh_attn_forward_q_k, self.opt)
+        self.kernel['nh_attn_backward_query'] = self.load_kernel_dtypes('nh_attn_backward_query', nh_attn_backward_query, self.opt)
+        self.kernel['nh_attn_backward_key'] = self.load_kernel_dtypes('nh_attn_backward_key', nh_attn_backward_key, self.opt)
+        self.kernel['nh_attn_backward_bias'] = self.load_kernel_dtypes('nh_attn_backward_bias', nh_attn_backward_bias, self.opt)
+        self.kernel['nh_attn_forward_attn_v'] = self.load_kernel_dtypes('nh_attn_forward_attn_v', nh_attn_forward_attn_v, self.opt)
+        self.kernel['nh_attn_backward_attn'] = self.load_kernel_dtypes('nh_attn_backward_attn', nh_attn_backward_attn, self.opt)
+        self.kernel['nh_attn_backward_value'] = self.load_kernel_dtypes('nh_attn_backward_value', nh_attn_backward_value, self.opt)
         
     def __call__(self,mode,dtype,inputs):
         self.kernel[mode][dtype](**inputs)
         
-    def load_kernel_detypes(self,kernel_name, code, opt):
+    def load_kernel_dtypes(self,kernel_name, code, opt):
         kernel_dict = {}
         opt['Dtype'] = 'float16'        
         kernel_dict['float16'] = load_kernel(kernel_name, code, **opt)
         opt['Dtype'] = 'float'
-        kernel_dict['float'] = load_kernel(kernel_name, code, **opt)
+        kernel_dict['float32'] = load_kernel(kernel_name, code, **opt)
         opt['Dtype'] = 'double'
-        kernel_dict['double'] = load_kernel(kernel_name, code, **opt)
+        kernel_dict['float64'] = load_kernel(kernel_name, code, **opt)
         return kernel_dict     
     
         
 class nh_attn_q_k(torch.autograd.Function):    
     @staticmethod
-    @custom_fwd(cast_inputs=torch.float16)
-    def forward(ctx, query, key, bias,function_set):
-        query = query.contiguous()
-        key = key.contiguous()
-        bias = bias.contiguous()
+    def forward(ctx, query, key, bias,nh_attn_function_set):
+        assert query.dim() == 5
+        assert key.dim() == 5
+        assert bias.dim() == 3
+        
+        query = query.detach()
+        key = key.detach()
+        bias = bias.detach()
+        batch_size, _, height, width , _ = query.shape
+        
+        ctx.input = query, key, bias
+        ctx.size = height, width
+        ctx.nh_attn_function_set = nh_attn_function_set
+        
+        query = cupy.ascontiguousarray(cupy.from_dlpack(query))
+        key = cupy.ascontiguousarray(cupy.from_dlpack(key))
+        bias = cupy.ascontiguousarray(cupy.from_dlpack(bias))
 
-        assert query.dim() == 5 and query.is_cuda
-        assert key.dim() == 5 and key.is_cuda
-        assert bias.dim() == 3 and bias.is_cuda
+        attn = cupy.empty((batch_size, nh_attn_function_set.opt['num_heads'],
+                          height, width,nh_attn_function_set.opt['window_sq_size']),dtype=query.dtype)
 
-        batch_size, num_heads, height, width ,channels = query.size()
-        attn = torch.zeros(batch_size, num_heads, height, width,function_set.opt['window_sq_size'],dtype=query.dtype,device=query.device)
+        n = attn.size
+        inputs = dict(block=(CUDA_NUM_THREADS,1,1),grid=(GET_BLOCKS(n),1,1),
+                      args=[query, key, bias, attn, n, height, width])
+        nh_attn_function_set('nh_attn_forward_q_k', query.dtype.name, inputs)
 
-        with torch.cuda.device_of(query):
-            n = attn.numel()
-            inputs = dict(block=(CUDA_NUM_THREADS,1,1),
-                          grid=(GET_BLOCKS(n),1,1),
-                          args=[query.data_ptr(), key.data_ptr(), bias.data_ptr(), attn.data_ptr(),
-                                n,height,width],
-                          stream=Stream(ptr=torch.cuda.current_stream().cuda_stream))
-            function_set('nh_attn_forward_q_k', Dtype(query), inputs)
-
-        ctx.save_for_backward(query, key, bias)
-        ctx.function_set = function_set
+        attn = torch.from_dlpack(attn.toDlpack())
         return attn
 
     @staticmethod
-    @custom_bwd
     def backward(ctx, d_attn):
-        d_attn = d_attn.contiguous()
+        query, key, bias = ctx.input
+        height, width = ctx.size
+        nh_attn_function_set = ctx.nh_attn_function_set
+        
+        d_attn = cupy.from_dlpack(d_attn.detach()).ravel()
+        query = cupy.from_dlpack(query).ravel()
+        key = cupy.from_dlpack(key).ravel()
+        bias = cupy.from_dlpack(bias).ravel()
 
-        assert d_attn.is_cuda
-
-        query, key, bias = ctx.saved_tensors
-        function_set = ctx.function_set
-
-        batch_size, num_heads, height, width ,channels = query.size()
         d_query, d_key, d_bias = None, None, None
 
-        with torch.cuda.device_of(d_attn):
-            if ctx.needs_input_grad[0]:
-                d_query = torch.zeros_like(query)
-                n = d_query.numel()
-                inputs = dict(block=(CUDA_NUM_THREADS,1,1),
-                              grid=(GET_BLOCKS(n),1,1),
-                              args=[key.data_ptr(), d_attn.data_ptr(), d_query.data_ptr(),
-                                    n,height,width],
-                              stream=Stream(ptr=torch.cuda.current_stream().cuda_stream))
-                function_set('nh_attn_backward_query',Dtype(d_query), inputs)
+        if ctx.needs_input_grad[0]:
+            d_query = cupy.zeros_like(query)
+            n = d_query.size
+            inputs = dict(block=(CUDA_NUM_THREADS,1,1),grid=(GET_BLOCKS(n),1,1),
+                          args=[key, d_attn, d_query,n,height,width])
+            nh_attn_function_set('nh_attn_backward_query',d_query.dtype.name, inputs)
+            d_query = torch.from_dlpack(d_query.toDlpack())
 
-            if ctx.needs_input_grad[1]:
-                d_key = torch.zeros_like(key)
-                n = d_key.numel()
-                inputs = dict(block=(CUDA_NUM_THREADS,1,1),
-                              grid=(GET_BLOCKS(n),1,1),
-                              args=[query.data_ptr(), d_attn.data_ptr(), d_key.data_ptr(),
-                                    n,height,width],
-                              stream=Stream(ptr=torch.cuda.current_stream().cuda_stream))
-                              
-                function_set('nh_attn_backward_key',Dtype(d_key), inputs)
+        if ctx.needs_input_grad[1]:
+            d_key = cupy.zeros_like(key)
+            n = d_key.size
+            inputs = dict(block=(CUDA_NUM_THREADS,1,1),grid=(GET_BLOCKS(n),1,1),
+                          args=[query, d_attn, d_key,n,height,width])
+            nh_attn_function_set('nh_attn_backward_key',d_key.dtype.name, inputs)
+            d_key = torch.from_dlpack(d_key.toDlpack())
 
-            if ctx.needs_input_grad[2]:
-                d_bias = torch.zeros_like(bias)
-                n = d_attn.numel()
-                inputs = dict(block=(CUDA_NUM_THREADS,1,1),
-                              grid=(GET_BLOCKS(n),1,1),
-                              args=[d_attn.data_ptr(), d_bias.data_ptr(),
-                                    n,height,width],
-                              stream=Stream(ptr=torch.cuda.current_stream().cuda_stream))
-                function_set('nh_attn_backward_bias',Dtype(d_bias), inputs)
+        if ctx.needs_input_grad[2]:
+            d_bias = cupy.zeros_like(bias)
+            n = d_attn.size
+            inputs = dict(block=(CUDA_NUM_THREADS,1,1),grid=(GET_BLOCKS(n),1,1),
+                          args=[d_attn, d_bias,n,height,width])
+            nh_attn_function_set('nh_attn_backward_bias',d_bias.dtype.name, inputs)
+            d_bias = torch.from_dlpack(d_bias.toDlpack())
         return d_query, d_key, d_bias, None
 
 class nh_attn_attn_v(torch.autograd.Function):
     @staticmethod
-    @custom_fwd(cast_inputs=torch.float16)
-    def forward(ctx,attn,value,function_set):
-        attn = attn.contiguous()
-        value = value.contiguous()
+    def forward(ctx,attn,value,nh_attn_function_set):
+        assert attn.dim() == 5
+        assert value.dim() == 5
+        
+        attn = attn.detach()
+        value = value.detach()
+        _, _, height, width, _ = value.shape
+        
+        ctx.input = attn, value
+        ctx.size = height, width
+        ctx.nh_attn_function_set = nh_attn_function_set
+        
+        attn = cupy.ascontiguousarray(cupy.from_dlpack(attn))
+        value = cupy.ascontiguousarray(cupy.from_dlpack(value))
+        
+        out = cupy.empty_like(value)
 
-        assert attn.dim() == 5 and attn.is_cuda
-        assert value.dim() == 5 and value.is_cuda
-
-        batch_size, num_heads, height, width ,channels = value.size()
-        out = torch.zeros_like(value)
-
-        with torch.cuda.device_of(attn):
-            n = out.numel()
-            inputs = dict(block=(CUDA_NUM_THREADS,1,1),
-                          grid=(GET_BLOCKS(n),1,1),
-                          args=[attn.data_ptr(), value.data_ptr(), out.data_ptr(),
-                                n,height,width],
-                          stream=Stream(ptr=torch.cuda.current_stream().cuda_stream))
-            function_set('nh_attn_forward_attn_v',Dtype(out), inputs)
-        ctx.save_for_backward(attn, value)
-        ctx.function_set = function_set
+        n = out.size
+        inputs = dict(block=(CUDA_NUM_THREADS,1,1),grid=(GET_BLOCKS(n),1,1),
+                      args=[attn, value, out,n,height,width])
+        nh_attn_function_set('nh_attn_forward_attn_v',out.dtype.name, inputs)
+        out = torch.from_dlpack(out.toDlpack())
         return out
 
     @staticmethod
-    @custom_bwd
     def backward(ctx, d_out):
-        d_out = d_out.contiguous()
-
-        assert d_out.is_cuda
-
-        attn, value = ctx.saved_tensors
-        function_set = ctx.function_set
-
-        batch_size, num_heads, height, width ,channels = value.size()
+        attn, value = ctx.input
+        height, width = ctx.size
+        nh_attn_function_set = ctx.nh_attn_function_set
+        
+        d_out = cupy.from_dlpack(d_out.detach()).ravel()
+        attn = cupy.from_dlpack(attn).ravel()
+        value = cupy.from_dlpack(value).ravel()
+        
         d_attn, d_value = None, None
 
-        with torch.cuda.device_of(d_out):
-            if ctx.needs_input_grad[0]:
-                d_attn = torch.zeros_like(attn)
-                n = d_attn.numel()
-                inputs = dict(block=(CUDA_NUM_THREADS,1,1),
-                              grid=(GET_BLOCKS(n),1,1),
-                              args=[value.data_ptr(), d_out.data_ptr(), d_attn.data_ptr(),
-                                    n,height,width],
-                              stream=Stream(ptr=torch.cuda.current_stream().cuda_stream))
-                function_set('nh_attn_backward_attn',Dtype(d_attn), inputs)
+        if ctx.needs_input_grad[0]:
+            d_attn = cupy.zeros_like(attn)
+            n = d_attn.size
+            inputs = dict(block=(CUDA_NUM_THREADS,1,1),grid=(GET_BLOCKS(n),1,1),
+                          args=[value, d_out, d_attn,n,height,width])
+            nh_attn_function_set('nh_attn_backward_attn',d_attn.dtype.name, inputs)
+            d_attn = torch.from_dlpack(d_attn.toDlpack())
 
-            if ctx.needs_input_grad[1]:
-                d_value = torch.zeros_like(value)
-                n = d_value.numel()
-                inputs = dict(block=(CUDA_NUM_THREADS,1,1),
-                              grid=(GET_BLOCKS(n),1,1),
-                              args=[attn.data_ptr(), d_out.data_ptr(), d_value.data_ptr(),
-                                    n,height,width],
-                              stream=Stream(ptr=torch.cuda.current_stream().cuda_stream))
-                function_set('nh_attn_backward_value',Dtype(d_value), inputs)
-
-        return d_attn, d_value,None
+        if ctx.needs_input_grad[1]:
+            d_value = cupy.zeros_like(value)
+            n = d_value.size
+            inputs = dict(block=(CUDA_NUM_THREADS,1,1),grid=(GET_BLOCKS(n),1,1),
+                          args=[attn, d_out, d_value,n,height,width])
+            nh_attn_function_set('nh_attn_backward_value',d_value.dtype.name, inputs)
+            d_value = torch.from_dlpack(d_value.toDlpack())
+        return d_attn, d_value, None
     
 class NeighborhoodAttention(nn.Module):
     def __init__(self, dim, kernel_size, num_heads,qkv_bias=True, qk_scale=None, attn_drop=0., proj_drop=0.):
@@ -498,7 +453,7 @@ class NeighborhoodAttention(nn.Module):
         self.scale = qk_scale or self.head_dim ** -0.5
         self.kernel_size = kernel_size
         
-        self.fuction_set = nh_attn_function_set(num_heads, self.head_dim, kernel_size)
+        self.nh_attn_function_set = nh_attn_function_set(num_heads, self.head_dim, kernel_size)
         self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
         self.proj = nn.Linear(dim, dim)
         self.attn_drop = nn.Dropout(attn_drop)
@@ -536,10 +491,10 @@ class NeighborhoodAttention(nn.Module):
     def nh_attn(self,input_1, input_2,mode='q_k'):
         if input_1.is_cuda and input_2.is_cuda and self.rpb.is_cuda:
             if mode.lower() == 'q_k':
-                attn = nh_attn_q_k.apply(input_1, input_2,self.rpb,self.fuction_set)
+                attn = nh_attn_q_k.apply(input_1, input_2,self.rpb,self.nh_attn_function_set)
                 return attn
             elif mode.lower() == 'attn_v':
-                out = nh_attn_attn_v.apply(input_1, input_2,self.fuction_set)
+                out = nh_attn_attn_v.apply(input_1, input_2,self.nh_attn_function_set)
                 return out
             else:
                 raise NotImplementedError
