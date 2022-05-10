@@ -1,0 +1,330 @@
+nh_attn_forward_q_k = '''
+extern "C"
+__global__ void nh_attn_forward_q_k(const ${Dtype}* __restrict__ query, 
+                                    const ${Dtype}* __restrict__ key, 
+                                    const ${Dtype}* __restrict__ bias, 
+                                    ${Dtype}* __restrict__ attn, 
+                                    const int x_size,
+                                    const int y_size,
+                                    const int height, 
+                                    const int width) {
+    const int x = blockIdx.x * blockDim.x + threadIdx.x;
+    if (x < x_size) {
+        const int y = blockIdx.y * blockDim.y + threadIdx.y;
+        if (y < y_size) {
+            const int z = blockIdx.z * blockDim.z + threadIdx.z;
+            if (z < ${window_sq_size}){
+                const int b = x / ${num_heads};
+                const int n_h = x - b * ${num_heads};
+                const int h = y / width;
+                const int w = y - h * width;
+                const int kh = z / ${window_size};
+                const int kw = z - kh * ${window_size};
+                
+                int ph = ${neighborhood_size};
+                int pw = ${neighborhood_size};
+                int nh = h - ${neighborhood_size};
+                int nw = w - ${neighborhood_size};
+                
+                if (nh < 0){
+                    nh = 0;
+                    ph = ${w_size_m1} - h;
+                }
+                else if (h + ${neighborhood_size} >= height){
+                    nh = height - ${window_size};
+                    ph = height - h - 1;
+                }
+                
+                if (nw < 0){
+                    nw = 0;
+                    pw = ${w_size_m1} - w;
+                }
+                else if (w + ${neighborhood_size} >= width){
+                    nw = width - ${window_size};
+                    pw = width - w - 1;
+                }
+                
+                const int batch_idx = b * ${num_heads} + n_h;
+                const int a_idx = (x * x_size + y) * y_size + z;
+                const int q_idx = ((batch_idx * height + h) * width + w) * ${channels};
+                const int k_idx = ((batch_idx * height + (kh+nh)) * width + (kw+nw)) * ${channels};
+                const int b_idx = n_h * ${b_stride_0} + (ph+kh) * ${bias_size} + (pw+kw);
+                
+                ${Dtype} update_value = 0;
+                #pragma unroll
+                for (int c=0; c < ${channels}; ++c){
+                    update_value += query[q_idx+c] * key[k_idx+c];
+                }
+                update_value += bias[b_idx];
+                attn[a_idx] = update_value;
+            }
+        }
+    }
+}
+'''
+
+nh_attn_backward_query = '''
+extern "C"
+__global__ void nh_attn_backward_query(const ${Dtype}* __restrict__ const key, 
+                                       const ${Dtype}* __restrict__ const d_attn, 
+                                       ${Dtype}* const __restrict__ d_query, \
+                                       const int x_size,
+                                       const int y_size, 
+                                       const int height, 
+                                       const int width) {
+    const int x = blockIdx.x * blockDim.x + threadIdx.x;
+    if (x < x_size) {
+        const int y = blockIdx.y * blockDim.y + threadIdx.y;
+        if (y < y_size) {
+            const int z = blockIdx.z * blockDim.z + threadIdx.z;
+            if (c < ${channels}){
+                const int b = x / ${num_heads};
+                const int n_h = x - b * ${num_heads};
+                const int h = y / width;
+                const int w = y - h * width;
+                
+                int nh = max(h - ${neighborhood_size}, 0) + (h + ${neighborhood_size} >= height) * (height - h - ${nh_size_m1});
+                int nw = max(w - ${neighborhood_size}, 0) + (w + ${neighborhood_size} >= width) * (width - w - ${nh_size_m1});
+                
+                const int batch_idx = b * ${num_heads} + n_h;
+                const int q_idx = (x * x_size + y) * y_size + c;
+                int a_idx = ((batch_idx * height + h) * width + w)*${window_sq_size};
+                
+                ${Dtype} update_value = 0;
+                #pragma unroll
+                for (int xh=nh; xh < nh + ${window_size}; ++xh){
+                    #pragma unroll
+                    for (int xw=nw; xw < nw + ${window_size}; ++xw){
+                        const int k_idx = (((batch_idx * height + xh) * width + xw) * ${channels} + c);
+                        update_value += d_attn[a_idx] * key[k_idx];
+                        ++a_idx;
+                    }
+                }
+                d_query[q_idx] = update_value;
+            }
+        }
+    }
+}
+'''
+
+nh_attn_backward_key = '''
+extern "C"
+__global__ void nh_attn_backward_key(const ${Dtype}* const __restrict__ query, 
+                                     const ${Dtype}* const __restrict__ d_attn, 
+                                     ${Dtype}* const __restrict__ d_key, 
+                                     const int x_size,
+                                     const int y_size,
+                                     const int height, 
+                                     const int width) {
+    const int x = blockIdx.x * blockDim.x + threadIdx.x;
+    if (x < x_size) {
+        const int y = blockIdx.y * blockDim.y + threadIdx.y;
+        if (y < y_size) {
+            const int c = blockIdx.z * blockDim.z + threadIdx.z;
+            if (c < ${channels}){
+                const int b = x / ${num_heads};
+                const int n_h = x - b * ${num_heads};
+                const int h = y / width;
+                const int w = y - h * width;
+                
+                int nh = max(h - ${neighborhood_size}, 0) + (h + ${neighborhood_size} >= height) * (height - h - ${nh_size_m1});
+                int nw = max(w - ${neighborhood_size}, 0) + (w + ${neighborhood_size} >= width) * (width - w - ${nh_size_m1});
+
+                const int batch_idx = b * ${num_heads} + n_h;
+                const int q_idx = (x * x_size + y) * y_size + c;
+                int a_idx = ((batch_idx * height + h) * width + w)*${window_sq_size};
+                
+                ${Dtype} update_value = 0;
+                #pragma unroll
+                for (int xh=nh; xh < nh + ${window_size}; ++xh){
+                    #pragma unroll
+                    for (int xw=nw; xw < nw + ${window_size}; ++xw){
+                        const int k_idx = (((batch_idx * height + xh) * width + xw) * ${channels} + c);
+                        atomicAdd(&d_key[k_idx], query[index] * d_attn[a_idx]);
+                        ++a_idx;
+                    }
+                }
+            }
+        }
+    }
+}
+'''
+
+nh_attn_backward_bias = '''
+extern "C"
+__global__ void nh_attn_backward_bias(const ${Dtype}* const __restrict__ d_attn, 
+                                      ${Dtype}* const __restrict__ d_bias, 
+                                      const int x_size,
+                                      const int y_size, 
+                                      const int height, 
+                                      const int width){
+    const int x = blockIdx.x * blockDim.x + threadIdx.x;
+    if (x < x_size) {
+        const int y = blockIdx.y * blockDim.y + threadIdx.y;
+        if (y < y_size) {
+            const int z = blockIdx.z * blockDim.z + threadIdx.z;
+            if (z < ${window_sq_size}){
+                const int n_h = x < ${num_heads} ? x : x % ${num_heads};
+                const int h = y / width;
+                const int w = y - h * width;
+                const int kh = z / ${window_size};
+                const int kw = z - kh * ${window_size};
+                
+                int ph = ${neighborhood_size};
+                int pw = ${neighborhood_size};
+                
+                if (h < ${neighborhood_size}){
+                    ph = ${w_size_m1} - h;
+                }
+                else if (h + ${neighborhood_size} >= height){
+                    ph = height - h - 1;
+                }
+                
+                if (w < ${neighborhood_size}){
+                    pw = ${w_size_m1} - w;
+                }
+                else if (w + ${neighborhood_size} >= width){
+                    pw = width - w - 1;
+                }
+                
+                const int a_idx = (x * x_size + y) * y_size + z;
+                const int b_idx = n_h * ${b_stride_0} + (ph+kh) * ${b_stride_1} + (pw+kw);
+                
+                atomicAdd(&d_bias[b_idx], d_attn[a_idx]);
+            }
+        }
+    }
+}
+'''
+nh_attn_forward_attn_v = '''
+extern "C"
+__global__ void nh_attn_forward_attn_v(const ${Dtype}* __restrict__ attn, 
+                                       const ${Dtype}* __restrict__ value, 
+                                       ${Dtype}* __restrict__ out, \
+                                       const int x_size,
+                                       const int y_size,
+                                       const int height, 
+                                       const int width) {
+    const int x = blockIdx.x * blockDim.x + threadIdx.x;
+    if (x < x_size) {
+        const int y = blockIdx.y * blockDim.y + threadIdx.y;
+        if (y < y_size) {
+            const int c = blockIdx.z * blockDim.z + threadIdx.z;
+            if (c < ${channels}){
+                const int b = x / ${num_heads};
+                const int n_h = x - b * ${num_heads};
+                const int h = y / width;
+                const int w = y - h * width;
+                
+                int nh = max(h - ${neighborhood_size}, 0) + (h + ${neighborhood_size} >= height) * (height - h - ${nh_size_m1});
+                int nw = max(w - ${neighborhood_size}, 0) + (w + ${neighborhood_size} >= width) * (width - w - ${nh_size_m1});
+                
+                const int batch_idx = b * ${num_heads} + n_h;
+                const int o_idx = (x * x_size + y) * y_size + c;
+                int a_idx = ((batch_idx * height + h) * width + w)*${window_sq_size};
+                
+                ${Dtype} update_value = 0;
+                #pragma unroll
+                for (int xh=nh; xh < nh + ${window_size}; ++xh){
+                    #pragma unroll
+                    for (int xw=nw; xw < nw + ${window_size}; ++xw){
+                        const int v_idx = (((batch_idx * height + xh) * width + xw) * ${channels} + c);
+                        update_value += attn[a_idx] * value[v_idx];
+                        ++a_idx;
+                    }
+                }
+                out[o_idx] = update_value;
+            }
+        }
+    }
+}
+'''
+nh_attn_backward_attn = '''
+extern "C"
+__global__ void nh_attn_backward_attn(const ${Dtype}* const __restrict__ value, 
+                                      const ${Dtype}* const __restrict__ d_out, 
+                                      ${Dtype}* const __restrict__ d_attn,
+                                      const int x_size,
+                                      const int y_size, 
+                                      const int height, 
+                                      const int width) {
+    const int x = blockIdx.x * blockDim.x + threadIdx.x;
+    if (x < x_size) {
+        const int y = blockIdx.y * blockDim.y + threadIdx.y;
+        if (y < y_size) {
+            const int z = blockIdx.z * blockDim.z + threadIdx.z;
+            if (z < ${window_sq_size}){
+                const int b = x / ${num_heads};
+                const int n_h = x - b * ${num_heads};
+                const int h = y / width;
+                const int w = y - h * width;
+                const int kh = z / ${window_size};
+                const int kw = z - kh * ${window_size};
+                
+                int nh = max(h - ${neighborhood_size}, 0) + (h + ${neighborhood_size} >= height) * (height - h - ${nh_size_m1});
+                int nw = max(w - ${neighborhood_size}, 0) + (w + ${neighborhood_size} >= width) * (width - w - ${nh_size_m1});
+
+                const int batch_idx = b * ${num_heads} + n_h;
+                const int a_idx = (x * x_size + y) * y_size + z;
+                const int o_idx = ((batch_idx * height + h) * width + w) * ${channels};
+                const int v_idx = ((batch_idx * height + (nh+kh))* width + (nw+kw)) * ${channels};
+                
+                ${Dtype} update_value = 0;
+                #pragma unroll
+                for (int c=0; c < ${channels}; ++c){
+                    update_value += d_out[o_idx+c] * value[v_idx+c];
+                }
+                d_attn[a_idx] = update_value;
+            }
+        }
+    }
+}
+'''
+
+nh_attn_backward_value = '''
+extern "C"
+__global__ void nh_attn_backward_value(const ${Dtype}* const __restrict__ attn, 
+                                       const ${Dtype}* const __restrict__ d_out, 
+                                       ${Dtype}* const __restrict__ d_value,
+                                       const int x_size,
+                                       const int y_size,
+                                       const int height, 
+                                       const int width) {
+    const int x = blockIdx.x * blockDim.x + threadIdx.x;
+    if (x < x_size) {
+        const int y = blockIdx.y * blockDim.y + threadIdx.y;
+        if (y < y_size) {
+            const int c = blockIdx.z * blockDim.z + threadIdx.z;
+            if (c < ${channels}) {
+                const int b = x / ${num_heads};
+                const int n_h = x - b * ${num_heads};
+                const int h = y / width;
+                const int w = y - h * width;
+                
+                int nh = max(h - ${neighborhood_size}, 0) + (h + ${neighborhood_size} >= height) * (height - h - ${nh_size_m1});
+                int nw = max(w - ${neighborhood_size}, 0) + (w + ${neighborhood_size} >= width) * (width - w - ${nh_size_m1});
+
+                const int batch_idx = b * ${num_heads} + n_h;
+                int a_idx = ((batch_idx * height + h) * width + w)*${window_sq_size};
+                const int o_idx = (x * x_size + y) * y_size + c;
+                
+                ${Dtype} update_value = 0;
+                #pragma unroll
+                for (int xh=nh; xh < nh + ${window_size}; ++xh){
+                    #pragma unroll
+                    for (int xw=nw; xw < nw + ${window_size}; ++xw){
+                        const int v_idx = (((batch_idx * height + xh) * width + xw) * ${channels} + c);
+                        atomicAdd(&d_value[v_idx], attn[a_idx] * d_out[o_idx]);
+                        ++a_idx;
+                    }
+                }
+            }
+        }
+    }
+}
+'''
+
+kernel_header = '''
+#include <cupy/carray.cuh>
+#include <cupy/atomics.cuh>
+'''
